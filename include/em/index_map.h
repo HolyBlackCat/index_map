@@ -634,6 +634,11 @@ namespace em
             return true;
         }
 
+        // Clear everything, including persistent data. But keep allocated memory.
+        constexpr void clear() noexcept {value_storage.clear(); indices.clear();}
+        // Clear values, but keep the keys and persistent data (i.e. `keys_size()` is preserved).
+        constexpr void soft_clear() noexcept {value_storage.clear();}
+
 
         // Persistent data:
 
@@ -675,7 +680,7 @@ namespace em
 
         // Access the container directly.
         [[nodiscard]] constexpr const value_container &values() const noexcept {return value_storage;}
-        // Access the container directly. The returned view is invalidated when the map is changed.
+        // Access the container directly.
         [[nodiscard]] constexpr value_view values() noexcept requires has_value_type {return *this;}
 
 
@@ -688,13 +693,13 @@ namespace em
         using key_value_iterator = detail::IndexMap::KeyValueIter<IndexMap, false>;
         using key_value_const_iterator = detail::IndexMap::KeyValueIter<IndexMap, true>;
         // A range of those iterators.
-        using key_value_range = detail::IndexMap::KeyValueView<IndexMap, false>;
-        using key_value_const_range = detail::IndexMap::KeyValueView<IndexMap, true>;
+        using key_value_view = detail::IndexMap::KeyValueView<IndexMap, false>;
+        using key_value_const_view = detail::IndexMap::KeyValueView<IndexMap, true>;
 
         // A random-access range, where each element has following methods:
         //     `.index()`, `.key()`, `.value()`, `.persistent_data()`, and also `.map()` that returns a reference to the target map.
-        [[nodiscard]] constexpr key_value_range       keys_and_values()       noexcept {return *this;}
-        [[nodiscard]] constexpr key_value_const_range keys_and_values() const noexcept {return *this;}
+        [[nodiscard]] constexpr key_value_view       keys_and_values()       noexcept {return *this;}
+        [[nodiscard]] constexpr key_value_const_view keys_and_values() const noexcept {return *this;}
     };
 
     // Erasing elements.

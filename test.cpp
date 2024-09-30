@@ -17,8 +17,8 @@ struct Data {int data = 0;};
     template class em::detail::IndexMap::KeyValueIter<em::IndexMap<__VA_ARGS__>, true>; \
     template class em::detail::IndexMap::KeyValueView<em::IndexMap<__VA_ARGS__>, false>; \
     template class em::detail::IndexMap::KeyValueView<em::IndexMap<__VA_ARGS__>, true>; \
-    static_assert(std::ranges::random_access_range<em::IndexMap<__VA_ARGS__>::key_value_range>); \
-    static_assert(std::ranges::random_access_range<em::IndexMap<__VA_ARGS__>::key_value_const_range>);
+    static_assert(std::ranges::random_access_range<em::IndexMap<__VA_ARGS__>::key_value_view>); \
+    static_assert(std::ranges::random_access_range<em::IndexMap<__VA_ARGS__>::key_value_const_view>);
 
 #define CHECK_ARGS_NONVOID(...) \
     CHECK_ARGS(__VA_ARGS__) \
@@ -812,7 +812,7 @@ int main()
     };
     key_value_range_advanced_checks.operator()<em::IndexMap<std::vector<int>>>();
 
-    //
+    // Non-member erase functions.
     constexpr auto nonmember_erase_checks = []<typename M>() consteval
     {
         // `.values()`:
@@ -931,4 +931,30 @@ int main()
         }
     };
     nonmember_erase_checks.operator()<em::IndexMap<int>>();
+
+    constexpr auto clear_checks = []<typename M>() consteval
+    {
+        { // Soft clear.
+            M m;
+            (void)m.insert(10);
+            (void)m.insert(20);
+
+            m.soft_clear();
+
+            Check(m.size() == 0);
+            Check(m.keys_size() == 2);
+        }
+
+        { // Hard clear.
+            M m;
+            (void)m.insert(10);
+            (void)m.insert(20);
+
+            m.clear();
+
+            Check(m.size() == 0);
+            Check(m.keys_size() == 0);
+        }
+    };
+    clear_checks.operator()<em::IndexMap<int>>();
 }
