@@ -233,8 +233,8 @@ namespace em
             }
 
             // Work around silly MSVC bugs. Last tested on 19.41.
-            #if defined(_MSC_VER) && !defined(__clang__)
-            #define DETAIL_EM_INDEXMAP_MSVC_ACCESS_WORKAROUND
+            #if !defined(__clang__) && (defined(_MSC_VER) || (defined(__GNUC__) && __GNUC__ <= 12))
+            #define DETAIL_EM_INDEXMAP_ACCESS_WORKAROUND
             constexpr auto &__detail_this_map()       {return this_map;}
             constexpr auto &__detail_this_map() const {return this_map;}
             constexpr auto &__detail_this_index()       {return this_index;}
@@ -275,7 +275,7 @@ namespace em
             [[nodiscard]] constexpr reference operator*() const noexcept {return state;}
             [[nodiscard]] constexpr pointer operator->() const noexcept {return {state};}
 
-            #ifdef DETAIL_EM_INDEXMAP_MSVC_ACCESS_WORKAROUND
+            #ifdef DETAIL_EM_INDEXMAP_ACCESS_WORKAROUND
             #define this_map __detail_this_map()
             #define this_index __detail_this_index()
             #endif
@@ -340,7 +340,7 @@ namespace em
                 #endif
             }
 
-            #ifdef DETAIL_EM_INDEXMAP_MSVC_ACCESS_WORKAROUND
+            #ifdef DETAIL_EM_INDEXMAP_ACCESS_WORKAROUND
             #undef this_map
             #undef this_index
             #endif

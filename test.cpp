@@ -3,7 +3,7 @@
 #include <string>
 
 // Commands to test this:
-//    clang++ test.cpp -std=c++20 -Wall -Wextra -pedantic-errors -Wconversion -Werror -g -o build/test && echo running... && build/test && echo ok
+//    clang++ test.cpp -std=c++20 -Wall -Wextra -pedantic-errors -Wconversion -Werror -g -o build/test -D_GLIBCXX_DEBUG -fsanitize=address -fsanitize=undefined && echo running... && build/test && echo ok
 //    cl /EHsc test.cpp /std:c++latest /Fe:build/test /Fo:build/test.obj && echo running... && build/test.exe && echo ok
 
 struct Data {int data = 0;};
@@ -33,7 +33,14 @@ CHECK_ARGS        (void       , unsigned long long      )
 CHECK_ARGS        (void       , unsigned int      , Data)
 CHECK_ARGS        (void       , unsigned long long, Data)
 
-struct A {int x = 0;};
+struct A
+{
+    int x = 0;
+    #ifndef __cpp_aggregate_paren_init
+    A() {}
+    A(int x) : x(x) {}
+    #endif
+};
 
 constexpr void Check(bool value)
 {
@@ -58,6 +65,18 @@ constexpr void DetailMustThrow(std::string_view message, auto &&func)
 
 #define MUST_THROW(message, ...) DetailMustThrow(message, [&]{__VA_ARGS__;})
 
+#if __cpp_designated_initializers && (!defined(__clang__) || __clang_major__ >= 16)
+#define DESIGNATED(...) __VA_ARGS__
+#else
+#define DESIGNATED(...)
+#endif
+
+#if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 12)
+#define PREFER_CONSTEVAL_LAMBDA consteval
+#else
+#define PREFER_CONSTEVAL_LAMBDA
+#endif
+
 int main()
 {
     // Value of `max_size()`.
@@ -75,7 +94,7 @@ int main()
     std::vector<int> v; v.push_back(1);
 
     // Compile-time checks.
-    constexpr auto basic_checks = []<typename M>() consteval
+    constexpr auto basic_checks = []<typename M>() PREFER_CONSTEVAL_LAMBDA
     {
         M m;
 
@@ -218,7 +237,7 @@ int main()
 
         // ---
 
-        typename M::insert_result ins_result = m.insert({.x = 42});
+        typename M::insert_result ins_result = m.insert({DESIGNATED(.x =) 42});
         Check(ins_result.key == k0);
         Check(ins_result.value.x == 42);
 
@@ -228,7 +247,7 @@ int main()
 
         m.erase(k3);
 
-        Check(m.insert({.x = 42}).key == k3);
+        Check(m.insert({DESIGNATED(.x =) 42}).key == k3);
         m.erase(k3);
 
         Check(m.key_to_index(k1) == 0);
@@ -262,7 +281,7 @@ int main()
 
         Check(!m.remove_unused_key());
 
-        Check(m.insert({.x = 1000}).key == k0);
+        Check(m.insert({DESIGNATED(.x =) 1000}).key == k0);
         Check(!m.remove_unused_key());
         m.erase(k1);
 
@@ -337,7 +356,7 @@ int main()
     }
 
     // Check the persistent data feature.
-    constexpr auto persistent_data_checks = []<typename M>() consteval
+    constexpr auto persistent_data_checks = []<typename M>() PREFER_CONSTEVAL_LAMBDA
     {
         M m;
 
@@ -391,7 +410,7 @@ int main()
     persistent_data_checks.operator()<em::IndexMap<A, unsigned int, Data>>();
 
     // Check `T == void`.
-    constexpr auto void_value_checks = []<typename M>() consteval
+    constexpr auto void_value_checks = []<typename M>() PREFER_CONSTEVAL_LAMBDA
     {
         M m;
 
@@ -564,7 +583,7 @@ int main()
     void_value_checks.operator()<em::IndexMap<void>>();
 
     // Check the `.values()` interface.
-    constexpr auto value_range_checks = []<typename M>() consteval
+    constexpr auto value_range_checks = []<typename M>() PREFER_CONSTEVAL_LAMBDA
     {
         M m;
         (void)m.emplace(10);
@@ -604,7 +623,7 @@ int main()
     value_range_checks.operator()<em::IndexMap<A>>();
 
     // Check the `.keys_and_values()` interface.
-    constexpr auto key_value_range_basic_checks = []<typename M>() consteval
+    constexpr auto key_value_range_basic_checks = []<typename M>() PREFER_CONSTEVAL_LAMBDA
     {
         constexpr bool has_values = M::has_value_type;
         constexpr bool has_pers_data = M::has_persistent_data_type;
@@ -717,7 +736,7 @@ int main()
     key_value_range_basic_checks.operator()<em::IndexMap<void, unsigned int, void>>();
 
     // Rich iterator interface.
-    constexpr auto key_value_range_advanced_checks = []<typename M>() consteval
+    constexpr auto key_value_range_advanced_checks = []<typename M>() PREFER_CONSTEVAL_LAMBDA
     {
         M m;
 
@@ -787,7 +806,7 @@ int main()
         Check(m[typename M::key(2)] == std::vector{31});
         Check(m[typename M::key(3)] == std::vector{40});
 
-        iter_swap(m.keys_and_values().begin(), m.keys_and_values().begin() + 2);
+        std::ranges::iter_swap(m.keys_and_values().begin(), m.keys_and_values().begin() + 2);
         // [0:21, 3:40, 1:10, 2:31]
 
         Check(m[0] == std::vector{21});
@@ -799,7 +818,7 @@ int main()
         Check(m[typename M::key(2)] == std::vector{31});
         Check(m[typename M::key(3)] == std::vector{40});
 
-        m.keys_and_values()[0] = iter_move(m.keys_and_values().begin() + 2);
+        m.keys_and_values()[0] = std::ranges::iter_move(m.keys_and_values().begin() + 2);
 
         Check(m[0] == std::vector{10});
         Check(m[1] == std::vector{40});
@@ -813,7 +832,7 @@ int main()
     key_value_range_advanced_checks.operator()<em::IndexMap<std::vector<int>>>();
 
     // Non-member erase functions.
-    constexpr auto nonmember_erase_checks = []<typename M>() consteval
+    constexpr auto nonmember_erase_checks = []<typename M>() PREFER_CONSTEVAL_LAMBDA
     {
         // `.values()`:
 
@@ -932,7 +951,7 @@ int main()
     };
     nonmember_erase_checks.operator()<em::IndexMap<int>>();
 
-    constexpr auto clear_checks = []<typename M>() consteval
+    constexpr auto clear_checks = []<typename M>() PREFER_CONSTEVAL_LAMBDA
     {
         { // Soft clear.
             M m;
