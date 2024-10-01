@@ -204,7 +204,7 @@ namespace em
 
             [[nodiscard]] constexpr map_type &map() const noexcept {return *this_map;}
             [[nodiscard]] constexpr std::size_t index() const noexcept {return this_index;}
-            [[nodiscard]] constexpr IndexMap::key key() const noexcept {return this_map->index_to_key_unsafe(this_index);}
+            [[nodiscard]] constexpr typename IndexMap::key key() const noexcept {return this_map->index_to_key_unsafe(this_index);}
             [[nodiscard]] constexpr Ref value() const noexcept requires map_type::has_value_type {return (*this_map)[this_index];}
             [[nodiscard]] constexpr PersistentDataRef persistent_data() const noexcept requires map_type::has_persistent_data_type {return this_map->get_persistent_data(this_map->index_to_key(this_index));}
 
