@@ -260,7 +260,7 @@ namespace em
 
             using value_type = KeyValueRef<IndexMap, IsConst>; // Would use `void` here to
             using reference = KeyValueRef<IndexMap, IsConst>;
-            using difference_type = IndexMap::difference_type;
+            using difference_type = typename IndexMap::difference_type;
             using iterator_category = std::random_access_iterator_tag;
 
             // This is what `operator->` returns.
