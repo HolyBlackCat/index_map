@@ -169,6 +169,21 @@ namespace em
         };
 
 
+        // The value type for `KeyValueRef`, to store the extracted values.
+        template <typename IndexMap>
+        struct KeyValueValue
+        {
+            IndexMap *map = nullptr;
+            typename IndexMap::key key{};
+            DETAIL_EM_INDEXMAP_NO_UNIQUE_ADDRESS VoidToEmpty<typename IndexMap::value_type> value{};
+
+            KeyValueValue() = default;
+
+            // Move-only, because inserting this into a range has weird semantics of swapping the keys, and having several copies do that can get weird.
+            KeyValueValue(KeyValueValue &&) = default;
+            KeyValueValue &operator=(KeyValueValue &&) = default;
+        };
+
         // A reference-like class to an element and its key.
         template <typename IndexMap, bool IsConst>
         class KeyValueRef
@@ -192,6 +207,7 @@ namespace em
             [[nodiscard]] KeyValueRef() = default;
             // Primarily for internal use.
             [[nodiscard]] constexpr KeyValueRef(MaybeConst<IndexMap> &this_map, std::size_t this_index) : this_map(&this_map), this_index(this_index) {}
+            [[nodiscard]] constexpr KeyValueRef(KeyValueValue<IndexMap> &value) : this_map(value.map), this_index(this_map->key_to_index(value.key)) {}
 
             // Convert non-const to const reference.
             [[nodiscard]] constexpr KeyValueRef(const KeyValueRef<IndexMap, !IsConst> &other) requires IsConst : this_map(&other.map()), this_index(other.index()) {}
@@ -215,9 +231,20 @@ namespace em
             {
                 KeyValueRef ref;
 
-                // Back conversion, possibly to a const ref. Some standard concepts check this.
+                // Convert back to a ref, possibly to a const ref. Some standard concepts check this.
                 template <bool IsConst2>
                 [[nodiscard]] constexpr operator KeyValueRef<IndexMap, IsConst2>() const requires(IsConst <= IsConst2) {return ref;}
+
+                // Convert to the value type.
+                template <bool IsConst2>
+                [[nodiscard]] constexpr operator KeyValueValue<IndexMap>() const && requires(!IsConst)
+                {
+                    KeyValueValue<IndexMap> ret;
+                    ret.map = &ref.map();
+                    ret.key = ref.key();
+                    ret.value = std::move(ref.value());
+                    return ret;
+                }
             };
             // Since this is reference-like, `this` is const. `other` is const just for consistency.
             constexpr const KeyValueRef &operator=(const moved &&other) const noexcept(map_type::has_value_type <= std::is_nothrow_move_assignable_v<typename IndexMap::value_type>) requires(!IsConst)
@@ -230,6 +257,14 @@ namespace em
             constexpr const KeyValueRef &operator=(const moved &&other)       noexcept(map_type::has_value_type <= std::is_nothrow_move_assignable_v<typename IndexMap::value_type>) requires(!IsConst)
             {
                 return std::as_const(*this) = std::move(other);
+            }
+
+            constexpr const KeyValueRef &operator=(const KeyValueValue<IndexMap> &&other) const noexcept(map_type::has_value_type <= std::is_nothrow_move_assignable_v<typename IndexMap::value_type>) requires(!IsConst)
+            {
+                if constexpr (IndexMap::has_value_type)
+                    value() = std::move(other.value);
+                this_map->swap_elem_indices_only(key(), other.key);
+                return *this;
             }
 
             // Work around silly MSVC bugs. Last tested on 19.41.
@@ -258,7 +293,7 @@ namespace em
             // Convert non-const to const iterators.
             [[nodiscard]] constexpr KeyValueIter(const KeyValueIter<IndexMap, !IsConst> &other) requires IsConst : state(other->map(), other->index()) {}
 
-            using value_type = KeyValueRef<IndexMap, IsConst>; // Would use `void` here to
+            using value_type = KeyValueValue<IndexMap>;
             using reference = KeyValueRef<IndexMap, IsConst>;
             using difference_type = typename IndexMap::difference_type;
             using iterator_category = std::random_access_iterator_tag;
@@ -461,20 +496,20 @@ namespace em
             constexpr KeyAndIndex(const IndexMap &self, std::size_t i) : k(self.index_to_key_unsafe(i)), i(i) {}
         };
 
-        constexpr void swap_indices_only(KeyAndIndex a, KeyAndIndex b)
+        constexpr void swap_indices_only_low(KeyAndIndex a, KeyAndIndex b)
         {
             DETAIL_EM_INDEXMAP_ASSERT(valid_index(a.i) && valid_index(b.i));
-            swap_indices_only_relaxed(a, b);
+            swap_indices_only_low_relaxed(a, b);
         }
-        constexpr void swap_indices_only_relaxed(KeyAndIndex a, KeyAndIndex b)
+        constexpr void swap_indices_only_low_relaxed(KeyAndIndex a, KeyAndIndex b)
         {
             DETAIL_EM_INDEXMAP_ASSERT(valid_index_relaxed(a.i) && valid_index_relaxed(b.i));
             std::swap(indices[std::size_t(a.k)].sparse_to_dense, indices[std::size_t(b.k)].sparse_to_dense);
             std::swap(indices[a.i].dense_to_sparse, indices[b.i].dense_to_sparse);
         }
 
-        constexpr void swap_elems_low(KeyAndIndex a, KeyAndIndex b) {swap_indices_only(a, b); if constexpr (has_value_type) std::ranges::swap((*this)[a.i], (*this)[b.i]);}
-        constexpr void move_elem_low(KeyAndIndex a, KeyAndIndex b) {swap_indices_only(a, b); if constexpr (has_value_type) (*this)[b.i] = std::move((*this)[a.i]);}
+        constexpr void swap_elems_low(KeyAndIndex a, KeyAndIndex b) {swap_indices_only_low(a, b); if constexpr (has_value_type) std::ranges::swap((*this)[a.i], (*this)[b.i]);}
+        constexpr void move_elem_low(KeyAndIndex a, KeyAndIndex b) {swap_indices_only_low(a, b); if constexpr (has_value_type) (*this)[b.i] = std::move((*this)[a.i]);}
 
         constexpr void can_increase_size_or_throw()
         {
@@ -517,7 +552,7 @@ namespace em
             contains_relaxed_or_throw(k);
             if (contains(k))
                 DETAIL_EM_INDEXMAP_THROW(std::out_of_range("This index map key is already in use."));
-            swap_indices_only_relaxed({*this, value_storage.size()}, {*this, k});
+            swap_indices_only_low_relaxed({*this, value_storage.size()}, {*this, k});
             return {k, value, indices[std::size_t(k)].sparse_data};
         }
 
@@ -629,7 +664,7 @@ namespace em
             std::size_t i = std::size_t(indices.back().sparse_to_dense);
             if (i < size())
                 return false;
-            swap_indices_only_relaxed({*this, i}, {*this, indices.size() - 1});
+            swap_indices_only_low_relaxed({*this, i}, {*this, indices.size() - 1});
             indices.pop_back();
             return true;
         }
@@ -666,12 +701,16 @@ namespace em
         // Changing element indices:
 
         // Swap the indices of two elements. Like `std::swap(m[i], m[j])`, but also swaps their keys.
-        constexpr void swap_elems(std::size_t i, std::size_t j) noexcept(has_value_type <= std::is_nothrow_swappable_v<T>) {swap_elems_low({*this, i}, {*this, j});}
+        constexpr void swap_elems(std::size_t i, std::size_t j) noexcept(has_value_type <= std::is_nothrow_swappable_v<T>) {valid_index_relaxed_or_throw(i); valid_index_relaxed_or_throw(j); swap_elems_low({*this, i}, {*this, j});}
+        constexpr void swap_elems(key         i, key         j) noexcept(has_value_type <= std::is_nothrow_swappable_v<T>) {contains_relaxed_or_throw   (i); contains_relaxed_or_throw   (j); swap_elems_low({*this, i}, {*this, j});}
         // Move the element at index `from_i` to `to_i`. Like `m[to_i] = std::move(m[from_i])`, but also swaps their keys.
         // Remember that classes typically don't support self-move-assignment, and we don't work around that in any way,
         //   so moving to the same index can break the element value (put it into valid but unspecified state).
-        constexpr void move_elem(std::size_t from_i, std::size_t to_i) noexcept(has_value_type <= std::is_nothrow_move_assignable_v<T>) {move_elem_low({*this, from_i}, {*this, to_i});}
-
+        constexpr void move_elem(std::size_t from_i, std::size_t to_i) noexcept(has_value_type <= std::is_nothrow_move_assignable_v<T>) {valid_index_relaxed_or_throw(from_i); valid_index_relaxed_or_throw(to_i); move_elem_low({*this, from_i}, {*this, to_i});}
+        constexpr void move_elem(key         from_i, key         to_i) noexcept(has_value_type <= std::is_nothrow_move_assignable_v<T>) {contains_relaxed_or_throw   (from_i); contains_relaxed_or_throw   (to_i); move_elem_low({*this, from_i}, {*this, to_i});}
+        // Like `swap_elems`, but don't actually swap the elements, assume that you already swapped them manually.
+        constexpr void swap_elem_indices_only(std::size_t i, std::size_t j) noexcept {valid_index_relaxed_or_throw(i); valid_index_relaxed_or_throw(j); swap_indices_only_low_relaxed({*this, i}, {*this, j});}
+        constexpr void swap_elem_indices_only(key         i, key         j) noexcept {contains_relaxed_or_throw   (i); contains_relaxed_or_throw   (j); swap_indices_only_low_relaxed({*this, i}, {*this, j});}
 
         // Range of values:
 
